@@ -1,5 +1,5 @@
 import sys
-
+from array import array
 
 def myers_diff(a, b):
     """
@@ -21,26 +21,32 @@ def myers_diff(a, b):
         return [("delete", x) for x in a]
 
     max_d = n + m
+    offset = max_d + 1
 
-    # V[k] = furthest x reached on diagonal k
-    v = {1: 0}
+    # V[k] = furthest x reached on diagonal k.
+    # A list is much more memory-efficient than a dictionary.
+    v = [0] * (2 * max_d + 3)
+
+    # Store only the reachable diagonals for each D.
+    # Each value is stored as a compact 32-bit integer.
     trace = []
 
     for d in range(max_d + 1):
-        trace.append(v.copy())
 
         for k in range(-d, d + 1, 2):
+
+            idx = k + offset
 
             # Choose insertion or deletion.
             if k == -d or (
                 k != d
-                and v.get(k - 1, -1) < v.get(k + 1, -1)
+                and v[idx - 1] < v[idx + 1]
             ):
                 # insertion
-                x = v.get(k + 1, 0)
+                x = v[idx + 1]
             else:
                 # deletion
-                x = v.get(k - 1, 0) + 1
+                x = v[idx - 1] + 1
 
             y = x - k
 
@@ -49,61 +55,111 @@ def myers_diff(a, b):
                 x += 1
                 y += 1
 
-            v[k] = x
+            v[idx] = x
 
             # Reached the end.
             if x >= n and y >= m:
-                trace[-1] = v.copy()
+                trace.append(
+                    array(
+                        "i",
+                        [v[offset + kk]
+                         for kk in range(-d, d + 1, 2)]
+                    )
+                )
                 return _backtrack(trace, a, b)
+
+        # Store only valid diagonals:
+        # -d, -d+2, ..., d
+        trace.append(
+            array(
+                "i",
+                [v[offset + kk]
+                 for kk in range(-d, d + 1, 2)]
+            )
+        )
 
     return []
 
 
+def _trace_value(trace, d, k):
+    """
+    Get V[k] from the compact trace.
+
+    At depth d, only:
+        -d, -d+2, ..., d
+    are stored.
+    """
+
+    if d < 0 or d >= len(trace):
+        return 0
+
+    if abs(k) > d:
+        return 0
+
+    # Convert diagonal k to compact array index.
+    index = (k + d) // 2
+
+    return trace[d][index]
+
+
 def _backtrack(trace, a, b):
-    """Reconstruct the shortest edit script from Myers trace."""
+    """Reconstruct the shortest edit script."""
 
     x = len(a)
     y = len(b)
 
     result = []
 
-    # Walk backwards through the trace.
+    # Walk backwards through the edit graph.
     for d in range(len(trace) - 1, 0, -1):
 
-        v = trace[d]
         k = x - y
 
-        # Decide whether the previous step was insertion or deletion.
+        # Look at the previous D layer.
+        previous_d = d - 1
+
+        # Decide whether previous move was insertion or deletion.
         if k == -d or (
             k != d
-            and v.get(k - 1, -1) < v.get(k + 1, -1)
+            and _trace_value(
+                trace,
+                previous_d,
+                k - 1
+            )
+            < _trace_value(
+                trace,
+                previous_d,
+                k + 1
+            )
         ):
-            # Insertion
+            # Previous move was insertion.
             previous_k = k + 1
-            previous_x = v.get(previous_k, 0)
-            previous_y = previous_x - previous_k
 
-            # Walk backwards through the snake.
-            while x > previous_x and y > previous_y:
-                result.append(("keep", a[x - 1]))
-                x -= 1
-                y -= 1
+        else:
+            # Previous move was deletion.
+            previous_k = k - 1
 
+        previous_x = _trace_value(
+            trace,
+            previous_d,
+            previous_k
+        )
+
+        previous_y = previous_x - previous_k
+
+        # Walk backwards through the snake.
+        while x > previous_x and y > previous_y:
+            result.append(("keep", a[x - 1]))
+            x -= 1
+            y -= 1
+
+        if x == previous_x:
+            # Insertion.
             result.append(("insert", b[y - 1]))
             y -= 1
 
         else:
-            # Deletion
-            previous_k = k - 1
-            previous_x = v.get(previous_k, 0)
-            previous_y = previous_x - previous_k
-
-            # Walk backwards through the snake.
-            while x > previous_x and y > previous_y:
-                result.append(("keep", a[x - 1]))
-                x -= 1
-                y -= 1
-
+            # Deletion.
             result.append(("delete", a[x - 1]))
             x -= 1
 
